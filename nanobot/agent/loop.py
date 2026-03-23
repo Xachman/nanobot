@@ -18,7 +18,7 @@ from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, ReadImageTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -118,7 +118,7 @@ class AgentLoop:
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-        for cls in (WriteFileTool, EditFileTool, ListDirTool):
+        for cls in (WriteFileTool, EditFileTool, ListDirTool, ReadImageTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
@@ -229,6 +229,10 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                if (img_tool := self.tools.get("read_image")) and isinstance(img_tool, ReadImageTool):
+                    if pending := img_tool.pop_pending_images():
+                        messages.append({"role": "user", "content": pending})
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can

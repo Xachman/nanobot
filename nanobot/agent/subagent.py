@@ -9,7 +9,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, ReadImageTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -98,6 +98,7 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(ReadImageTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
@@ -150,6 +151,10 @@ class SubagentManager:
                             "name": tool_call.name,
                             "content": result,
                         })
+
+                    if (img_tool := tools.get("read_image")) and isinstance(img_tool, ReadImageTool):
+                        if pending := img_tool.pop_pending_images():
+                            messages.append({"role": "user", "content": pending})
                 else:
                     final_result = response.content
                     break
