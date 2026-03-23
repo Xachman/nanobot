@@ -365,6 +365,13 @@ def _make_provider(config: Config):
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
         )
+    # Ollama: direct provider using the ollama Python library
+    elif provider_name == "ollama":
+        from nanobot.providers.ollama_provider import OllamaProvider
+        provider = OllamaProvider(
+            api_base=config.get_api_base(model) or "http://localhost:11434",
+            default_model=model,
+        )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:
