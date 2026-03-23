@@ -99,30 +99,54 @@ class OllamaProvider(LLMProvider):
     def _convert_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert OpenAI-format messages for the ollama client.
 
-        The ollama Pydantic Message model expects tool_calls[].function.arguments
-        to be a dict, not a JSON string (which is what OpenAI wire format uses).
+        - tool_calls[].function.arguments must be a dict, not a JSON string.
+        - content may be a list (multimodal); flatten to a string and extract
+          images into the separate `images` field that ollama expects.
         """
         import json
         result = []
         for msg in messages:
+            msg = dict(msg)
+
+            # --- handle multimodal content (list of parts) ---
+            content = msg.get("content")
+            if isinstance(content, list):
+                texts: list[str] = []
+                images: list[str] = []
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") == "text":
+                        texts.append(part.get("text", ""))
+                    elif part.get("type") == "image_url":
+                        url = (part.get("image_url") or {}).get("url", "")
+                        # Strip the data-URI prefix so ollama gets raw base64
+                        if url.startswith("data:"):
+                            url = url.split(",", 1)[-1]
+                        images.append(url)
+                msg["content"] = " ".join(texts)
+                if images:
+                    msg["images"] = images
+
+            # --- handle tool_calls arguments ---
             tool_calls = msg.get("tool_calls")
-            if not tool_calls:
-                result.append(msg)
-                continue
-            converted_tcs = []
-            for tc in tool_calls:
-                fn = tc.get("function", {})
-                args = fn.get("arguments")
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except Exception:
-                        args = {}
-                converted_tcs.append({
-                    **tc,
-                    "function": {**fn, "arguments": args},
-                })
-            result.append({**msg, "tool_calls": converted_tcs})
+            if tool_calls:
+                converted_tcs = []
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    args = fn.get("arguments")
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {}
+                    converted_tcs.append({
+                        **tc,
+                        "function": {**fn, "arguments": args},
+                    })
+                msg["tool_calls"] = converted_tcs
+
+            result.append(msg)
         return result
 
     def _parse(self, response: Any) -> LLMResponse:
