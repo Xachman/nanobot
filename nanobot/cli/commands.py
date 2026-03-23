@@ -369,6 +369,7 @@ def _make_provider(config: Config):
     elif provider_name == "ollama":
         from nanobot.providers.ollama_provider import OllamaProvider
         provider = OllamaProvider(
+            api_key=config.get_api_key(model),
             api_base=config.get_api_base(model) or "http://localhost:11434",
             default_model=model,
         )
