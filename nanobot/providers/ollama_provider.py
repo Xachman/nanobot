@@ -8,6 +8,7 @@ from typing import Any
 import json_repair
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from ollama import Message
 
 _STRIP_PREFIXES = ("ollama/", "ollama_chat/")
 
@@ -28,9 +29,9 @@ class OllamaProvider(LLMProvider):
         self._api_base = api_base.rstrip("/")
 
     def _get_client(self) -> Any:
-        from ollama import AsyncClient
+        from ollama import Client
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        return AsyncClient(host=self._api_base, headers=headers)
+        return Client(host=self._api_base, headers=headers)
 
     async def chat(
         self,
@@ -49,14 +50,26 @@ class OllamaProvider(LLMProvider):
 
         try:
             client = self._get_client()
-            response = await client.chat(
+            chunks: list[Message] = []
+            last_chunk = None
+            for chunk in client.chat(
                 model=resolved_model,
                 messages=self._convert_messages(self._sanitize_empty_content(messages)),
                 tools=self._convert_tools(tools) if tools else [],
-                stream=False,
+                stream=True,
                 options={"temperature": temperature, "num_predict": max(1, max_tokens)},
-            )
-            return self._parse(response)
+            ):
+                if chunk.message:
+                    chunks.append(chunk.message)
+                last_chunk = chunk
+            response = self._parse(chunks)
+            response.finish_reason = last_chunk.done_reason
+            response.usage = {
+                'prompt_tokens': 0,
+                'competion_tokens': 0,
+                'total_tokens': 0
+            }
+            return response
         except Exception as e:
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
@@ -149,34 +162,31 @@ class OllamaProvider(LLMProvider):
             result.append(msg)
         return result
 
-    def _parse(self, response: Any) -> LLMResponse:
-        msg = response.message
+    def _parse(
+            self, 
+            msgs: list[Message], 
+            ) -> LLMResponse:
+        content = ''
         tool_calls: list[ToolCallRequest] = []
-        for tc in msg.tool_calls or []:
-            args = tc.function.arguments
-            if isinstance(args, str):
-                args = json_repair.loads(args)
-            tool_calls.append(
-                ToolCallRequest(
-                    id=uuid.uuid4().hex[:9],
-                    name=tc.function.name,
-                    arguments=args if isinstance(args, dict) else {},
+        for msg in msgs:
+            content += msg.content
+            for tc in msg.tool_calls or []:
+                args = tc.function.arguments
+                if isinstance(args, str):
+                    args = json_repair.loads(args)
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=uuid.uuid4().hex[:9],
+                        name=tc.function.name,
+                        arguments=args if isinstance(args, dict) else {},
+                    )
                 )
-            )
-
-        usage: dict[str, int] = {}
-        if (n := getattr(response, "prompt_eval_count", None)) is not None:
-            usage["prompt_tokens"] = n
-        if (n := getattr(response, "eval_count", None)) is not None:
-            usage["completion_tokens"] = n
-        if len(usage) == 2:
-            usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
 
         return LLMResponse(
-            content=msg.content or None,
+            content=content,
             tool_calls=tool_calls,
-            finish_reason=getattr(response, "done_reason", None) or "stop",
-            usage=usage,
+            finish_reason=None,
+            usage=None,
         )
 
     def get_default_model(self) -> str:
