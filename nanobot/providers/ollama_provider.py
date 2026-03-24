@@ -65,9 +65,9 @@ class OllamaProvider(LLMProvider):
             response = self._parse(chunks)
             response.finish_reason = last_chunk.done_reason
             response.usage = {
-                'prompt_tokens': 0,
-                'competion_tokens': 0,
-                'total_tokens': 0
+                'prompt_tokens': last_chunk.prompt_eval_count,
+                'competion_tokens': last_chunk.eval_count,
+                'total_tokens': last_chunk.prompt_eval_count + last_chunk.eval_count
             }
             return response
         except Exception as e:
