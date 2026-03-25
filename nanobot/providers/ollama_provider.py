@@ -50,12 +50,21 @@ class OllamaProvider(LLMProvider):
 
         try:
             client = self._get_client()
+
+            if isinstance(tool_choice, dict) and tools:
+                forced_name = (tool_choice.get("function") or {}).get("name")
+                filtered = [t for t in tools if t.get("function", {}).get("name") == forced_name]
+                converted_tools = self._convert_tools(filtered) if filtered else []
+            else:
+                converted_tools = self._convert_tools(tools) if tools else []
+
             chunks: list[Message] = []
             last_chunk = None
             for chunk in client.chat(
                 model=resolved_model,
+                think=reasoning_effort,
                 messages=self._convert_messages(self._sanitize_empty_content(messages)),
-                tools=self._convert_tools(tools) if tools else [],
+                tools=converted_tools,
                 stream=True,
                 options={"temperature": temperature, "num_predict": max(1, max_tokens)},
             ):
