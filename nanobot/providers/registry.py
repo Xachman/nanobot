@@ -305,16 +305,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         is_local=True,
     ),
-    # Ollama (local, OpenAI-compatible)
+    # Ollama (local, native ollama client)
     ProviderSpec(
         name="ollama",
         keywords=("ollama", "nemotron"),
         env_key="OLLAMA_API_KEY",
         display_name="Ollama",
-        backend="openai_compat",
+        backend="ollama",
         is_local=True,
         detect_by_base_keyword="11434",
-        default_api_base="http://localhost:11434/v1",
+        default_api_base="http://localhost:11434",
     ),
     # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
     ProviderSpec(
