@@ -255,8 +255,7 @@ class SlackChannel(BaseChannel):
         """Download Slack file attachments and return local file paths."""
         if not files or not self.config.bot_token:
             return []
-        media_dir = (self.media_dir / "slack") if self.media_dir else get_media_dir("slack")
-        media_dir.mkdir(parents=True, exist_ok=True)
+        media_dir = get_media_dir("slack")
         paths: list[str] = []
         async with httpx.AsyncClient(timeout=60.0) as client:
             for f in files:
