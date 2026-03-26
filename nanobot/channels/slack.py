@@ -1,9 +1,11 @@
 """Slack channel implementation using Socket Mode."""
 
 import asyncio
+import mimetypes
 import re
 from typing import Any
 
+import httpx
 from loguru import logger
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -16,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from pydantic import Field
 
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
 
@@ -176,8 +179,9 @@ class SlackChannel(BaseChannel):
         sender_id = event.get("user")
         chat_id = event.get("channel")
 
-        # Ignore bot/system messages (any subtype = not a normal user message)
-        if event.get("subtype"):
+        # Ignore bot/system messages, but allow file_share subtype
+        subtype = event.get("subtype")
+        if subtype and subtype != "file_share":
             return
         if self._bot_user_id and sender_id == self._bot_user_id:
             return
@@ -210,6 +214,7 @@ class SlackChannel(BaseChannel):
             return
 
         text = self._strip_bot_mention(text)
+        media = await self._download_files(event.get("files") or [])
 
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
@@ -233,6 +238,7 @@ class SlackChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=text,
+                media=media or None,
                 metadata={
                     "slack": {
                         "event": event,
@@ -244,6 +250,41 @@ class SlackChannel(BaseChannel):
             )
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
+
+    async def _download_files(self, files: list[dict]) -> list[str]:
+        """Download Slack file attachments and return local file paths."""
+        if not files or not self.config.bot_token:
+            return []
+        media_dir = (self.media_dir / "slack") if self.media_dir else get_media_dir("slack")
+        media_dir.mkdir(parents=True, exist_ok=True)
+        paths: list[str] = []
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for f in files:
+                url = f.get("url_private_download") or f.get("url_private")
+                if not url:
+                    continue
+                file_id = f.get("id", "unknown")
+                name = f.get("name") or ""
+                mimetype = f.get("mimetype", "")
+                ext = ""
+                if name and "." in name:
+                    ext = "." + name.rsplit(".", 1)[-1]
+                elif mimetype:
+                    ext = mimetypes.guess_extension(mimetype) or ""
+                dest = media_dir / f"{file_id}{ext}"
+                try:
+                    resp = await client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {self.config.bot_token}"},
+                        follow_redirects=True,
+                    )
+                    resp.raise_for_status()
+                    dest.write_bytes(resp.content)
+                    paths.append(str(dest))
+                    logger.debug("Downloaded Slack file {} -> {}", file_id, dest)
+                except Exception as e:
+                    logger.warning("Failed to download Slack file {}: {}", file_id, e)
+        return paths
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
         """Remove the in-progress reaction and optionally add a done reaction."""
