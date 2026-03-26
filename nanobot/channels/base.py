@@ -23,7 +23,6 @@ class BaseChannel(ABC):
     name: str = "base"
     display_name: str = "Base"
     transcription_api_key: str = ""
-    media_dir: Path | None = None
 
     def __init__(self, config: Any, bus: MessageBus):
         """
