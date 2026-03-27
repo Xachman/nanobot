@@ -22,6 +22,21 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
 
+def _slack_media_type(mimetype: str) -> str:
+    """Map a MIME type to a human-readable media label."""
+    if mimetype.startswith("image/"):
+        return "image"
+    if mimetype.startswith("audio/"):
+        return "audio"
+    if mimetype.startswith("video/"):
+        return "video"
+    if mimetype in ("text/plain", "text/csv", "application/json", "application/xml"):
+        return "file"
+    if mimetype.startswith("text/"):
+        return "file"
+    return "file"
+
+
 class SlackDMConfig(Base):
     """Slack DM policy configuration."""
 
@@ -214,7 +229,9 @@ class SlackChannel(BaseChannel):
             return
 
         text = self._strip_bot_mention(text)
-        media = await self._download_files(event.get("files") or [])
+        media, file_labels = await self._download_files(event.get("files") or [])
+        if file_labels:
+            text = (text + "\n" + "\n".join(file_labels)).strip()
 
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
@@ -238,7 +255,7 @@ class SlackChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=text,
-                media=media or None,
+                media=media or [],
                 metadata={
                     "slack": {
                         "event": event,
@@ -251,12 +268,13 @@ class SlackChannel(BaseChannel):
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
 
-    async def _download_files(self, files: list[dict]) -> list[str]:
-        """Download Slack file attachments and return local file paths."""
+    async def _download_files(self, files: list[dict]) -> tuple[list[str], list[str]]:
+        """Download Slack file attachments. Returns (media_paths, content_labels)."""
         if not files or not self.config.bot_token:
-            return []
+            return [], []
         media_dir = get_media_dir("slack")
         paths: list[str] = []
+        labels: list[str] = []
         async with httpx.AsyncClient(timeout=60.0) as client:
             for f in files:
                 url = f.get("url_private_download") or f.get("url_private")
@@ -279,11 +297,14 @@ class SlackChannel(BaseChannel):
                     )
                     resp.raise_for_status()
                     dest.write_bytes(resp.content)
-                    paths.append(str(dest))
+                    path_str = str(dest)
+                    paths.append(path_str)
+                    media_type = _slack_media_type(mimetype)
+                    labels.append(f"[{media_type}: {path_str}]")
                     logger.debug("Downloaded Slack file {} -> {}", file_id, dest)
                 except Exception as e:
                     logger.warning("Failed to download Slack file {}: {}", file_id, e)
-        return paths
+        return paths, labels
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
         """Remove the in-progress reaction and optionally add a done reaction."""
