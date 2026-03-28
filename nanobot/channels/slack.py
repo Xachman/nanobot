@@ -1,9 +1,11 @@
 """Slack channel implementation using Socket Mode."""
 
 import asyncio
+import mimetypes
 import re
 from typing import Any
 
+import httpx
 from loguru import logger
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -16,7 +18,23 @@ from nanobot.bus.queue import MessageBus
 from pydantic import Field
 
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+
+
+def _slack_media_type(mimetype: str) -> str:
+    """Map a MIME type to a human-readable media label."""
+    if mimetype.startswith("image/"):
+        return "image"
+    if mimetype.startswith("audio/"):
+        return "audio"
+    if mimetype.startswith("video/"):
+        return "video"
+    if mimetype in ("text/plain", "text/csv", "application/json", "application/xml"):
+        return "file"
+    if mimetype.startswith("text/"):
+        return "file"
+    return "file"
 
 
 class SlackDMConfig(Base):
@@ -116,8 +134,12 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
-            # Slack DMs don't use threads; channel/group replies may keep thread_ts.
-            thread_ts_param = thread_ts if thread_ts and channel_type != "im" else None
+            # Use thread_ts if present. For DMs, only thread when replying to an
+            # existing thread (thread_ts differs from the triggering message ts),
+            # not when reply_in_thread synthesized one from the root message ts.
+            event_ts = (slack_meta.get("event") or {}).get("ts")
+            is_existing_thread = thread_ts and thread_ts != event_ts
+            thread_ts_param = thread_ts if (channel_type != "im" or is_existing_thread) and thread_ts else None
 
             # Slack rejects empty text payloads. Keep media-only messages media-only,
             # but send a single blank message when the bot has no text or files to send.
@@ -172,8 +194,9 @@ class SlackChannel(BaseChannel):
         sender_id = event.get("user")
         chat_id = event.get("channel")
 
-        # Ignore bot/system messages (any subtype = not a normal user message)
-        if event.get("subtype"):
+        # Ignore bot/system messages, but allow file_share subtype
+        subtype = event.get("subtype")
+        if subtype and subtype != "file_share":
             return
         if self._bot_user_id and sender_id == self._bot_user_id:
             return
@@ -206,6 +229,9 @@ class SlackChannel(BaseChannel):
             return
 
         text = self._strip_bot_mention(text)
+        media, file_labels = await self._download_files(event.get("files") or [])
+        if file_labels:
+            text = (text + "\n" + "\n".join(file_labels)).strip()
 
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
@@ -229,6 +255,7 @@ class SlackChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=text,
+                media=media or [],
                 metadata={
                     "slack": {
                         "event": event,
@@ -240,6 +267,44 @@ class SlackChannel(BaseChannel):
             )
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
+
+    async def _download_files(self, files: list[dict]) -> tuple[list[str], list[str]]:
+        """Download Slack file attachments. Returns (media_paths, content_labels)."""
+        if not files or not self.config.bot_token:
+            return [], []
+        media_dir = get_media_dir("slack")
+        paths: list[str] = []
+        labels: list[str] = []
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for f in files:
+                url = f.get("url_private_download") or f.get("url_private")
+                if not url:
+                    continue
+                file_id = f.get("id", "unknown")
+                name = f.get("name") or ""
+                mimetype = f.get("mimetype", "")
+                ext = ""
+                if name and "." in name:
+                    ext = "." + name.rsplit(".", 1)[-1]
+                elif mimetype:
+                    ext = mimetypes.guess_extension(mimetype) or ""
+                dest = media_dir / f"{file_id}{ext}"
+                try:
+                    resp = await client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {self.config.bot_token}"},
+                        follow_redirects=True,
+                    )
+                    resp.raise_for_status()
+                    dest.write_bytes(resp.content)
+                    path_str = str(dest)
+                    paths.append(path_str)
+                    media_type = _slack_media_type(mimetype)
+                    labels.append(f"[{media_type}: {path_str}]")
+                    logger.debug("Downloaded Slack file {} -> {}", file_id, dest)
+                except Exception as e:
+                    logger.warning("Failed to download Slack file {}: {}", file_id, e)
+        return paths, labels
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
         """Remove the in-progress reaction and optionally add a done reaction."""

@@ -10,12 +10,24 @@ from nanobot.config.schema import Config
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
+_media_dir_override: Path | None = None
 
 
 def set_config_path(path: Path) -> None:
     """Set the current config path (used to derive data directory)."""
     global _current_config_path
     _current_config_path = path
+
+
+def set_media_dir(path: Path | None) -> None:
+    """Override the media directory (used when agents.defaults.mediaDir is configured)."""
+    global _media_dir_override
+    _media_dir_override = path
+
+
+def get_media_dir_override() -> Path | None:
+    """Return the configured media directory override, if any."""
+    return _media_dir_override
 
 
 def get_config_path() -> Path:

@@ -505,6 +505,26 @@ class TelegramChannel(BaseChannel):
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=html, parse_mode="HTML",
                 )
+            except BadRequest as e:
+                if "message is not modified" in str(e).lower():
+                    pass  # Content already up-to-date, treat as success
+                else:
+                    logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                    try:
+                        await self._call_with_retry(
+                            self._app.bot.edit_message_text,
+                            chat_id=int_chat_id, message_id=buf.message_id,
+                            text=buf.text,
+                        )
+                    except BadRequest as e2:
+                        if "message is not modified" in str(e2).lower():
+                            pass  # Content already up-to-date
+                        else:
+                            logger.warning("Final stream edit failed: {}", e2)
+                            raise  # Let ChannelManager handle retry
+                    except Exception as e2:
+                        logger.warning("Final stream edit failed: {}", e2)
+                        raise  # Let ChannelManager handle retry
             except Exception as e:
                 if self._is_not_modified_error(e):
                     logger.debug("Final stream edit already applied for {}", chat_id)
@@ -517,6 +537,12 @@ class TelegramChannel(BaseChannel):
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=buf.text,
                     )
+                except BadRequest as e2:
+                    if "message is not modified" in str(e2).lower():
+                        pass  # Content already up-to-date
+                    else:
+                        logger.warning("Final stream edit failed: {}", e2)
+                        raise  # Let ChannelManager handle retry
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
                         logger.debug("Final stream plain edit already applied for {}", chat_id)
