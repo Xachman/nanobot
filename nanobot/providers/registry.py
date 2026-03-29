@@ -315,7 +315,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="ollama",
         is_local=True,
         detect_by_base_keyword="11434",
-        default_api_base="http://localhost:11434/v1",
+        default_api_base="http://localhost:11434",
     ),
     # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
     ProviderSpec(
