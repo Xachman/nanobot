@@ -225,6 +225,11 @@ class AgentLoop:
             def __init__(self) -> None:
                 self._stream_buf = ""
 
+            async def before_iteration(self, context: AgentHookContext) -> None:
+                if (img_tool := loop_self.tools.get("read_image")) and isinstance(img_tool, ReadImageTool):
+                    if pending := img_tool.pop_pending_images():
+                        context.messages.append({"role": "user", "content": pending})
+
             def wants_streaming(self) -> bool:
                 return on_stream is not None
 
