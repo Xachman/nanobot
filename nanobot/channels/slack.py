@@ -61,6 +61,7 @@ class SlackConfig(Base):
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+    timeout: int = 60
 
 
 class SlackChannel(BaseChannel):
@@ -93,7 +94,7 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        self._web_client = AsyncWebClient(token=self.config.bot_token)
+        self._web_client = AsyncWebClient(token=self.config.bot_token, timeout=self.config.timeout)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
             web_client=self._web_client,
