@@ -172,13 +172,15 @@ class OllamaProvider(LLMProvider):
         return result
 
     def _parse(
-            self, 
-            msgs: list[Message], 
+            self,
+            msgs: list[Message],
             ) -> LLMResponse:
         content = ''
+        thinking = ''
         tool_calls: list[ToolCallRequest] = []
         for msg in msgs:
-            content += msg.content
+            content += msg.content or ''
+            thinking += msg.thinking or ''
             for tc in msg.tool_calls or []:
                 args = tc.function.arguments
                 if isinstance(args, str):
@@ -196,6 +198,7 @@ class OllamaProvider(LLMProvider):
             tool_calls=tool_calls,
             finish_reason=None,
             usage=None,
+            reasoning_content=thinking or None,
         )
 
     def get_default_model(self) -> str:
