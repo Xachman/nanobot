@@ -135,12 +135,7 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
-            # Use thread_ts if present. For DMs, only thread when replying to an
-            # existing thread (thread_ts differs from the triggering message ts),
-            # not when reply_in_thread synthesized one from the root message ts.
-            event_ts = (slack_meta.get("event") or {}).get("ts")
-            is_existing_thread = thread_ts and thread_ts != event_ts
-            thread_ts_param = thread_ts if (channel_type != "im" or is_existing_thread) and thread_ts else None
+            thread_ts_param = thread_ts or None
 
             # Slack rejects empty text payloads. Keep media-only messages media-only,
             # but send a single blank message when the bot has no text or files to send.
@@ -248,8 +243,8 @@ class SlackChannel(BaseChannel):
         except Exception as e:
             logger.debug("Slack reactions_add failed: {}", e)
 
-        # Thread-scoped session key for channel/group messages
-        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        # Thread-scoped session key for all message types
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts else None
 
         try:
             await self._handle_message(
