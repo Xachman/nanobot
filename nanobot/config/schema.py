@@ -43,6 +43,8 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     media_dir: str | None = None  # Override media storage directory (default: ~/.nanobot/media)
+    enable_planning: bool = True  # Run a no-tool planning pass before the main agent loop
+    planning_prompt: str | None = None  # Custom planning instruction (None → built-in default)
 
 
 class AgentsConfig(Base):

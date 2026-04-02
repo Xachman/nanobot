@@ -47,7 +47,7 @@ class ContextBuilder:
         if skills_summary:
             parts.append(f"""# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+Skills extend your capabilities. **Before responding to any request, scan these skills and load any that are relevant** by reading the skill's `<location>` path with `read_file`. Do this first, before taking other actions.
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")

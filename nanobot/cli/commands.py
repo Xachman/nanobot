@@ -560,6 +560,8 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        enable_planning=config.agents.defaults.enable_planning,
+        planning_prompt=config.agents.defaults.planning_prompt,
     )
 
     # Set cron callback (needs agent)
@@ -766,6 +768,8 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        enable_planning=config.agents.defaults.enable_planning,
+        planning_prompt=config.agents.defaults.planning_prompt,
     )
 
     # Shared reference for progress callbacks

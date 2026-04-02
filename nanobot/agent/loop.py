@@ -69,6 +69,8 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        enable_planning: bool = False,
+        planning_prompt: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -102,6 +104,12 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
         )
 
+        self.enable_planning = enable_planning
+        self.planning_prompt = planning_prompt or (
+            "Before using any tools, briefly outline the steps you will take to complete "
+            "this request. Be concise — a short numbered list is ideal."
+            "Be sure to use any related Skills"
+        )
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -209,6 +217,30 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    async def _run_planning_stage(self, initial_messages: list[dict]) -> list[dict]:
+        """Run a no-tool planning pass and inject the plan before the main loop.
+
+        Returns augmented messages: [...initial_messages, assistant(plan), user("proceed")]
+        so the main loop starts with the plan already in context.
+        If the LLM returns no content, the original messages are returned unchanged.
+        """
+        plan_messages = initial_messages + [
+            {"role": "user", "content": self.planning_prompt},
+        ]
+        response = await self.provider.chat_with_retry(
+            messages=plan_messages,
+            tools=[],
+            model=self.model,
+        )
+        plan = self._strip_think(response.content)
+        if not plan:
+            return initial_messages
+        from nanobot.utils.helpers import build_assistant_message
+        return initial_messages + [
+            build_assistant_message(plan),
+            {"role": "user", "content": "Good. Now execute the plan."},
+        ]
 
     async def _run_agent_loop(
         self,
@@ -465,6 +497,9 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+
+        if self.enable_planning:
+            initial_messages = await self._run_planning_stage(initial_messages)
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
