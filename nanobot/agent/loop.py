@@ -219,10 +219,11 @@ class AgentLoop:
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_planning_stage(self, initial_messages: list[dict]) -> list[dict]:
-        """Run a no-tool planning pass and inject the plan before the main loop.
+        """Run a no-tool planning pass and inject the plan as a system directive.
 
-        Returns augmented messages: [...initial_messages, assistant(plan), user("proceed")]
-        so the main loop starts with the plan already in context.
+        Returns augmented messages: [system(plan), ...initial_messages]
+        so the main loop starts with the plan in system context.
+        The LLM then responds directly to the original user message, following the plan.
         If the LLM returns no content, the original messages are returned unchanged.
         """
         plan_messages = initial_messages + [
@@ -236,11 +237,12 @@ class AgentLoop:
         plan = self._strip_think(response.content)
         if not plan:
             return initial_messages
-        from nanobot.utils.helpers import build_assistant_message
-        return initial_messages + [
-            build_assistant_message(plan),
-            {"role": "user", "content": "Good. Now execute the plan."},
-        ]
+        # Prepend a system message with the plan
+        system_plan = {
+            "role": "system",
+            "content": f"Plan (internal guidance only, do not repeat to user):\n{plan}"
+        }
+        return [system_plan] + initial_messages
 
     async def _run_agent_loop(
         self,
