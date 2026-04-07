@@ -83,6 +83,11 @@ class _LoopHook(AgentHook):
             await self._on_stream_end(resuming=resuming)
         self._stream_buf = ""
 
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        if (img_tool := self._loop.tools.get("read_image")) and isinstance(img_tool, ReadImageTool):
+            if pending := img_tool.pop_pending_images():
+                context.messages.append({"role": "user", "content": pending})
+
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
             if not self._on_stream:
