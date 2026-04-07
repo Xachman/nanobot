@@ -77,6 +77,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    media_dir: str | None = None  # Override media storage directory (default: ~/.nanobot/media)
 
 
 class AgentsConfig(Base):

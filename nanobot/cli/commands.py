@@ -444,6 +444,13 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    elif backend == "ollama":
+        from nanobot.providers.ollama_provider import OllamaProvider
+        provider = OllamaProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
@@ -466,7 +473,7 @@ def _make_provider(config: Config):
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path, set_config_path, set_media_dir
 
     config_path = None
     if config:
@@ -485,6 +492,8 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     _warn_deprecated_config_keys(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
+    if loaded.agents.defaults.media_dir:
+        set_media_dir(Path(loaded.agents.defaults.media_dir).expanduser())
     return loaded
 
 
@@ -664,6 +673,7 @@ def gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
@@ -896,6 +906,7 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,

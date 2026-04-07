@@ -20,7 +20,9 @@ def get_runtime_subdir(name: str) -> Path:
 
 def get_media_dir(channel: str | None = None) -> Path:
     """Return the media directory, optionally namespaced per channel."""
-    base = get_runtime_subdir("media")
+    from nanobot.config.loader import get_media_dir_override
+    override = get_media_dir_override()
+    base = ensure_dir(override) if override else get_runtime_subdir("media")
     return ensure_dir(base / channel) if channel else base
 
 
