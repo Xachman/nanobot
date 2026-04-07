@@ -5,6 +5,7 @@ import mimetypes
 import re
 from typing import Any
 
+import aiohttp
 import httpx
 from loguru import logger
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -94,7 +95,12 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        self._web_client = AsyncWebClient(token=self.config.bot_token, timeout=self.config.timeout)
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True, keepalive_timeout=30)
+        session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=self.config.timeout),
+        )
+        self._web_client = AsyncWebClient(token=self.config.bot_token, timeout=self.config.timeout, session=session)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
             web_client=self._web_client,
@@ -125,6 +131,8 @@ class SlackChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Slack socket close failed: {}", e)
             self._socket_client = None
+        if self._web_client and self._web_client.session and not self._web_client.session.closed:
+            await self._web_client.session.close()
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
@@ -134,7 +142,6 @@ class SlackChannel(BaseChannel):
         try:
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
-            channel_type = slack_meta.get("channel_type")
             thread_ts_param = thread_ts or None
 
             # Slack rejects empty text payloads. Keep media-only messages media-only,
