@@ -58,26 +58,31 @@ class OllamaProvider(LLMProvider):
             else:
                 converted_tools = self._convert_tools(tools) if tools else []
 
+            converted_messages = self._convert_messages(self._sanitize_empty_content(messages))
             chunks: list[Message] = []
             last_chunk = None
             for chunk in client.chat(
                 model=resolved_model,
                 think=reasoning_effort,
-                messages=self._convert_messages(self._sanitize_empty_content(messages)),
+                messages=converted_messages,
                 tools=converted_tools,
                 stream=True,
                 options={"temperature": temperature, "num_predict": max(1, max_tokens)},
             ):
-                if chunk.message:
-                    chunks.append(chunk.message)
+                msg = chunk.message
+                if msg and (msg.content or msg.thinking or msg.tool_calls):
+                    chunks.append(msg)
                 last_chunk = chunk
             response = self._parse(chunks)
-            response.finish_reason = last_chunk.done_reason
+            prompt_tokens = (last_chunk.prompt_eval_count or 0) if last_chunk else 0
+            completion_tokens = (last_chunk.eval_count or 0) if last_chunk else 0
+            response.finish_reason = last_chunk.done_reason if last_chunk else "stop"
             response.usage = {
-                'prompt_tokens': last_chunk.prompt_eval_count,
-                'competion_tokens': last_chunk.eval_count,
-                'total_tokens': last_chunk.prompt_eval_count + last_chunk.eval_count
+                'prompt_tokens': prompt_tokens,
+                'completion_tokens': completion_tokens,
+                'total_tokens': prompt_tokens + completion_tokens,
             }
+
             return response
         except Exception as e:
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
@@ -124,11 +129,17 @@ class OllamaProvider(LLMProvider):
         - tool_calls[].function.arguments must be a dict, not a JSON string.
         - content may be a list (multimodal); flatten to a string and extract
           images into the separate `images` field that ollama expects.
+        - reasoning_content on assistant messages is mapped to the `thinking`
+          field that ollama expects.
         """
         import json
         result = []
         for msg in messages:
             msg = dict(msg)
+
+            # --- map reasoning_content -> thinking for assistant messages ---
+            if msg.get("role") == "assistant" and "reasoning_content" in msg:
+                msg["thinking"] = msg.pop("reasoning_content")
 
             # --- handle multimodal content (list of parts) ---
             content = msg.get("content")
