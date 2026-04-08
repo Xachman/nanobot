@@ -55,6 +55,7 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        metadata: dict | None = None,
     ) -> None:
         self._loop = agent_loop
         self._on_progress = on_progress
@@ -63,6 +64,7 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._metadata = metadata
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -101,7 +103,7 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id, self._metadata)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage or {}
@@ -379,6 +381,7 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            metadata=metadata,
         )
         hook: AgentHook = (
             _LoopHookChain(loop_hook, self._extra_hooks)

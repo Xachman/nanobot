@@ -148,11 +148,13 @@ class SlackChannel(BaseChannel):
 
             for media_path in msg.media or []:
                 try:
-                    await self._web_client.files_upload_v2(
-                        channel=msg.chat_id,
-                        file=media_path,
-                        thread_ts=thread_ts_param,
-                    )
+                    upload_kwargs: dict[str, Any] = {
+                        "channel": msg.chat_id,
+                        "file": media_path,
+                    }
+                    if thread_ts_param:
+                        upload_kwargs["thread_ts"] = thread_ts_param
+                    await self._web_client.files_upload_v2(**upload_kwargs)
                 except Exception as e:
                     logger.error("Failed to upload file {}: {}", media_path, e)
 
