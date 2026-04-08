@@ -75,7 +75,7 @@ class OllamaProvider(LLMProvider):
             response.finish_reason = last_chunk.done_reason
             response.usage = {
                 'prompt_tokens': last_chunk.prompt_eval_count,
-                'competion_tokens': last_chunk.eval_count,
+                'completion_tokens': last_chunk.eval_count,
                 'total_tokens': last_chunk.prompt_eval_count + last_chunk.eval_count
             }
             return response
