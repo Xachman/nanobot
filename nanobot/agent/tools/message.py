@@ -101,15 +101,14 @@ class MessageTool(Tool):
             return "Error: Message sending not configured"
 
         meta = dict(self._default_metadata)
-        meta["message_id"] = message_id
+        if message_id:
+            meta["message_id"] = message_id
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata={
-                "message_id": message_id,
-            } if message_id else {},
+            metadata=meta,
         )
 
         try:
