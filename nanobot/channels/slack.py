@@ -1,9 +1,11 @@
 """Slack channel implementation using Socket Mode."""
 
 import asyncio
+import mimetypes
 import re
 from typing import Any
 
+import httpx
 from loguru import logger
 from pydantic import Field
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -15,7 +17,23 @@ from slackify_markdown import slackify_markdown
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+
+
+def _slack_media_type(mimetype: str) -> str:
+    """Map a MIME type to a human-readable media label."""
+    if mimetype.startswith("image/"):
+        return "image"
+    if mimetype.startswith("audio/"):
+        return "audio"
+    if mimetype.startswith("video/"):
+        return "video"
+    if mimetype in ("text/plain", "text/csv", "application/json", "application/xml"):
+        return "file"
+    if mimetype.startswith("text/"):
+        return "file"
+    return "file"
 
 
 class SlackDMConfig(Base):
@@ -42,6 +60,7 @@ class SlackConfig(Base):
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+    timeout: int = 60
 
 
 class SlackChannel(BaseChannel):
@@ -78,7 +97,7 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        self._web_client = AsyncWebClient(token=self.config.bot_token)
+        self._web_client = AsyncWebClient(token=self.config.bot_token, timeout=self.config.timeout)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
             web_client=self._web_client,
@@ -292,8 +311,9 @@ class SlackChannel(BaseChannel):
         sender_id = event.get("user")
         chat_id = event.get("channel")
 
-        # Ignore bot/system messages (any subtype = not a normal user message)
-        if event.get("subtype"):
+        # Ignore bot/system messages, but allow file_share subtype
+        subtype = event.get("subtype")
+        if subtype and subtype != "file_share":
             return
         if self._bot_user_id and sender_id == self._bot_user_id:
             return
@@ -326,6 +346,9 @@ class SlackChannel(BaseChannel):
             return
 
         text = self._strip_bot_mention(text)
+        media, file_labels = await self._download_files(event.get("files") or [])
+        if file_labels:
+            text = (text + "\n" + "\n".join(file_labels)).strip()
 
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
@@ -341,14 +364,15 @@ class SlackChannel(BaseChannel):
         except Exception as e:
             logger.debug("Slack reactions_add failed: {}", e)
 
-        # Thread-scoped session key for channel/group messages
-        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        # Thread-scoped session key for all message types
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts else None
 
         try:
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=text,
+                media=media or [],
                 metadata={
                     "slack": {
                         "event": event,
@@ -360,6 +384,44 @@ class SlackChannel(BaseChannel):
             )
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
+
+    async def _download_files(self, files: list[dict]) -> tuple[list[str], list[str]]:
+        """Download Slack file attachments. Returns (media_paths, content_labels)."""
+        if not files or not self.config.bot_token:
+            return [], []
+        media_dir = get_media_dir("slack")
+        paths: list[str] = []
+        labels: list[str] = []
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for f in files:
+                url = f.get("url_private_download") or f.get("url_private")
+                if not url:
+                    continue
+                file_id = f.get("id", "unknown")
+                name = f.get("name") or ""
+                mimetype = f.get("mimetype", "")
+                ext = ""
+                if name and "." in name:
+                    ext = "." + name.rsplit(".", 1)[-1]
+                elif mimetype:
+                    ext = mimetypes.guess_extension(mimetype) or ""
+                dest = media_dir / f"{file_id}{ext}"
+                try:
+                    resp = await client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {self.config.bot_token}"},
+                        follow_redirects=True,
+                    )
+                    resp.raise_for_status()
+                    dest.write_bytes(resp.content)
+                    path_str = str(dest)
+                    paths.append(path_str)
+                    media_type = _slack_media_type(mimetype)
+                    labels.append(f"[{media_type}: {path_str}]")
+                    logger.debug("Downloaded Slack file {} -> {}", file_id, dest)
+                except Exception as e:
+                    logger.warning("Failed to download Slack file {}: {}", file_id, e)
+        return paths, labels
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
         """Remove the in-progress reaction and optionally add a done reaction."""

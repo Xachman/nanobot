@@ -12,7 +12,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, ReadImageTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
@@ -120,6 +120,7 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(ReadImageTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
             if self.exec_config.enable:
