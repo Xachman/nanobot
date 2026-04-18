@@ -140,10 +140,11 @@ class SlackChannel(BaseChannel):
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
             origin_chat_id = str((slack_meta.get("event", {}) or {}).get("channel") or msg.chat_id)
-            # Slack DMs don't use threads; channel/group replies may keep thread_ts.
+            # Only thread replies to the same conversation; never attach a thread
+            # from one conversation to a different target.
             thread_ts_param = (
                 thread_ts
-                if thread_ts and channel_type != "im" and target_chat_id == origin_chat_id
+                if thread_ts and target_chat_id == origin_chat_id
                 else None
             )
 
