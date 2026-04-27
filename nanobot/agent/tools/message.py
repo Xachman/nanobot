@@ -37,8 +37,11 @@ class MessageTool(Tool):
             "message_default_message_id",
             default=default_message_id,
         )
+        self._default_metadata: ContextVar[dict[str, Any]] = ContextVar(
+            "message_default_metadata",
+            default={},
+        )
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
-        self._default_metadata: ContextVar[dict] = ContextVar("message_metadata", default = {})
 
 
     def set_context(
@@ -52,7 +55,7 @@ class MessageTool(Tool):
         self._default_channel.set(channel)
         self._default_chat_id.set(chat_id)
         self._default_message_id.set(message_id)
-        self._default_metadata.set(metadata)
+        self._default_metadata.set(metadata or {})
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -116,7 +119,7 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
-        meta = dict(self._default_metadata)
+        meta = self._default_metadata.get()
         if message_id:
             meta["message_id"] = message_id
         msg = OutboundMessage(

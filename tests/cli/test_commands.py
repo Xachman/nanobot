@@ -224,7 +224,7 @@ def test_config_matches_explicit_ollama_prefix_without_api_key():
     config.agents.defaults.model = "ollama/llama3.2"
 
     assert config.get_provider_name() == "ollama"
-    assert config.get_api_base() == "http://localhost:11434/v1"
+    assert config.get_api_base() == "http://localhost:11434"
 
 
 def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
@@ -233,7 +233,7 @@ def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
     config.agents.defaults.model = "llama3.2"
 
     assert config.get_provider_name() == "ollama"
-    assert config.get_api_base() == "http://localhost:11434/v1"
+    assert config.get_api_base() == "http://localhost:11434"
 
 
 def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
