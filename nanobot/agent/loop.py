@@ -21,7 +21,7 @@ from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRun
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, ReadImageTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -62,6 +62,7 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        metadata: dict | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._loop = agent_loop
@@ -71,6 +72,7 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._metadata = metadata
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -93,6 +95,9 @@ class _LoopHook(AgentHook):
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         self._loop._current_iteration = context.iteration
+        if (img_tool := self._loop.tools.get("read_image")) and isinstance(img_tool, ReadImageTool):
+            if pending := img_tool.pop_pending_images():
+                context.messages.append({"role": "user", "content": pending})
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -107,7 +112,7 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id, self._metadata)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage or {}
@@ -271,6 +276,7 @@ class AgentLoop:
         for cls in (GlobTool, GrepTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(NotebookEditTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ReadImageTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         if self.exec_config.enable:
             self.tools.register(
                 ExecTool(
@@ -316,7 +322,13 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
         # Compute the effective session key (accounts for unified sessions)
         # so that subagent results route to the correct pending queue.
@@ -328,6 +340,10 @@ class AgentLoop:
                         tool.set_context(channel, chat_id, effective_key=effective_key)
                     else:
                         tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id, metadata)
+                    else:
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -394,6 +410,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
+        metadata: dict | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -412,6 +429,7 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            metadata=metadata,
         )
         hook: AgentHook = (
             CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
@@ -727,7 +745,7 @@ class AgentLoop:
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
                 self.sessions.save(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), msg.metadata)
             history = session.get_history(max_messages=0)
             current_role = "assistant" if is_subagent else "user"
 
@@ -744,6 +762,7 @@ class AgentLoop:
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                metadata=msg.metadata,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
@@ -784,7 +803,7 @@ class AgentLoop:
             session_summary=pending,
         )
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), msg.metadata)
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -849,6 +868,7 @@ class AgentLoop:
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
+            metadata=msg.metadata,
         )
 
         if final_content is None or not final_content.strip():

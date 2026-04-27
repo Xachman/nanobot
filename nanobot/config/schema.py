@@ -90,6 +90,7 @@ class AgentDefaults(Base):
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    media_dir: str | None = None  # Override media storage directory (default: ~/.nanobot/media)
 
 
 class AgentsConfig(Base):

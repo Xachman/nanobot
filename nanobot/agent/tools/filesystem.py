@@ -1,5 +1,6 @@
 """File system tools: read, write, edit, list."""
 
+import base64
 import difflib
 import mimetypes
 import os
@@ -905,3 +906,73 @@ class ListDirTool(_FsTool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {e}"
+
+
+# ---------------------------------------------------------------------------
+# read_image
+# ---------------------------------------------------------------------------
+
+_IMAGE_SIZE_LIMIT = 10 * 1024 * 1024  # 10 MB
+
+
+class ReadImageTool(_FsTool):
+    """Read an image file and inject it into the conversation as a vision-compatible user message."""
+
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_allowed_dirs: list[Path] | None = None,
+    ):
+        super().__init__(workspace, allowed_dir, extra_allowed_dirs)
+        self._pending: list[dict] = []
+
+    def pop_pending_images(self) -> list[dict]:
+        """Return and clear images queued for injection into the conversation."""
+        images, self._pending = self._pending, []
+        return images
+
+    @property
+    def name(self) -> str:
+        return "read_image"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Read an image file and view its contents. "
+            "Supports PNG, JPEG, GIF, and WebP formats."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The image file path to read"},
+            },
+            "required": ["path"],
+        }
+
+    async def execute(self, path: str, **kwargs: Any) -> str:
+        try:
+            fp = self._resolve(path)
+            if not fp.exists():
+                return f"Error: File not found: {path}"
+            if not fp.is_file():
+                return f"Error: Not a file: {path}"
+
+            raw = fp.read_bytes()
+            if len(raw) > _IMAGE_SIZE_LIMIT:
+                return f"Error: Image file too large ({len(raw)} bytes, limit is {_IMAGE_SIZE_LIMIT})"
+
+            mime = detect_image_mime(raw) or mimetypes.guess_type(str(fp))[0]
+            if not mime or not mime.startswith("image/"):
+                return f"Error: Not a recognized image file: {path}"
+
+            b64 = base64.b64encode(raw).decode()
+            self._pending.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            return f"Image loaded: {fp.name} ({len(raw)} bytes, {mime})"
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error reading image: {e}"

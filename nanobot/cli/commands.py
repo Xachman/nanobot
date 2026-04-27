@@ -457,6 +457,13 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    elif backend == "ollama":
+        from nanobot.providers.ollama_provider import OllamaProvider
+        provider = OllamaProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
@@ -479,7 +486,7 @@ def _make_provider(config: Config):
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path, set_config_path, set_media_dir
 
     config_path = None
     if config:
@@ -498,6 +505,8 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     _warn_deprecated_config_keys(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
+    if loaded.agents.defaults.media_dir:
+        set_media_dir(Path(loaded.agents.defaults.media_dir).expanduser())
     return loaded
 
 
@@ -557,7 +566,7 @@ def serve(
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.base_session_manager import BaseSessionManager
 
     if verbose:
         logger.enable("nanobot")
@@ -572,7 +581,7 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
-    session_manager = SessionManager(runtime_config.workspace_path)
+    session_manager = BaseSessionManager(runtime_config.workspace_path)
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -657,7 +666,7 @@ def _run_gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.base_session_manager import BaseSessionManager
 
     port = port if port is not None else config.gateway.port
 
@@ -665,7 +674,7 @@ def _run_gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+    session_manager = BaseSessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -690,6 +699,7 @@ def _run_gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
@@ -1004,6 +1014,7 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,

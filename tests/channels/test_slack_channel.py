@@ -127,7 +127,7 @@ async def test_send_uses_thread_for_channel_messages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_omits_thread_for_dm_messages() -> None:
+async def test_send_uses_thread_for_dm_messages() -> None:
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     fake_web = _FakeAsyncWebClient()
     channel._web_client = fake_web
@@ -144,9 +144,9 @@ async def test_send_omits_thread_for_dm_messages() -> None:
 
     assert len(fake_web.chat_post_calls) == 1
     assert fake_web.chat_post_calls[0]["text"] == "hello\n"
-    assert fake_web.chat_post_calls[0]["thread_ts"] is None
+    assert fake_web.chat_post_calls[0]["thread_ts"] == "1700000000.000100"
     assert len(fake_web.file_upload_calls) == 1
-    assert fake_web.file_upload_calls[0]["thread_ts"] is None
+    assert fake_web.file_upload_calls[0]["thread_ts"] == "1700000000.000100"
 
 
 @pytest.mark.asyncio
